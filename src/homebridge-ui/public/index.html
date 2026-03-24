@@ -1,0 +1,134 @@
+<head>
+   <meta charset="utf-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1">
+   <title>First Alert by Resideo</title>
+   <link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+   <div class="text-center mt-5">
+      <img id="firstalert-logo" src="./branding/Homebridge_x_FirstAlert.svg" alt="homebridge-firstalert logo"
+         style="width: 240px;" onerror="this.onerror=null;this.src='/branding/icon.png';" />
+      <h2 class="mt-3">First Alert by Resideo</h2>
+      <div id="auth-section" class="mt-4" style="max-width: 400px; margin: 0 auto;">
+         <div id="login-form" style="display: none;">
+            <button type="button" class="btn btn-primary w-100 mt-3" id="startAuthButton">Link Resideo Account</button>
+            <div id="authInstructions" class="alert alert-info mt-3" style="display:none;"></div>
+            <div id="codeEntrySection" style="display:none;">
+               <label for="inputAuthCodeUrl">Paste Redirect URL</label>
+               <input type="text" class="form-control" id="inputAuthCodeUrl"
+                  placeholder="Paste the full URL you were redirected to after login">
+               <small class="form-text text-muted">Example:
+                  <code>com.resideo.firstalert://login.resideo.com/ios/com.resideo.firstalert/callback?code=AUTH_CODE&state=STATE</code></small>
+               <button type="button" class="btn btn-success w-100 mt-2" id="submitAuthCodeButton">Submit</button>
+            </div>
+            <pre id="loginLogs"
+               style="background:#222;color:#eee;padding:1em;margin-top:1em;max-height:180px;overflow:auto;display:none;font-size:0.95em;"></pre>
+         </div>
+         <div id="unlink-section" style="display: none;">
+            <div class="alert alert-success" style="display: none;" id="linkSuccess">Account linked. You may now close
+               this
+               window.</div>
+            <button type="button" class="btn btn-danger w-100" id="unlinkButton">Unlink Account</button>
+         </div>
+      </div>
+      <div class="mt-4">
+         <small class="text-muted">You will be redirected to Resideo to log in. Your credentials are never seen or
+            stored by this plugin.</small>
+      </div>
+   </div>
+</body>
+<div id="pageDevices" class="mt-4" style="display: none;">
+   <div id="deviceInfo">
+      <form>
+         <div class="form-group">
+            <select class="form-control" id="deviceSelect"></select>
+         </div>
+      </form>
+      <table class="table w-100" id="deviceTable" style="display: none;">
+         <thead>
+            <tr class="table-active">
+               <th scope="col" style="width: 40%;">Device Name</th>
+               <th scope="col" style="width: 60%;" id="displayName"></th>
+            </tr>
+         </thead>
+         <tbody>
+            <tr>
+               <th scope="row">Device ID</th>
+               <td id="deviceID"></td>
+            </tr>
+            <tr>
+               <th scope="row">Model</th>
+               <td id="model"></td>
+            </tr>
+            <tr>
+               <th scope="row">Firmware Version</th>
+               <td id="firmwareRevision"></td>
+            </tr>
+         </tbody>
+      </table>
+   </div>
+</div>
+<div id="pageSupport" class="mt-4" style="display: none;">
+   <p class="text-center lead">Thank you for using <strong>homebridge-firstalert</strong></p>
+   <p class="text-center">The links below will take you to our GitHub wiki</p>
+   <h5>Setup</h5>
+   <ul>
+      <li>
+         <a href="https://github.com/homebridge-plugins/homebridge-firstalert/wiki" target="_blank">Wiki Home</a>
+      </li>
+      <li>
+         <a href="https://github.com/homebridge-plugins/homebridge-firstalert/wiki/Configuration"
+            target="_blank">Configuration</a>
+      </li>
+      <li>
+         <a href="https://github.com/homebridge-plugins/homebridge-firstalert/wiki/Beta-Version" target="_blank">Beta
+            Version</a>
+      </li>
+      <li>
+         <a href="https://github.com/homebridge-plugins/homebridge-firstalert/wiki/Node-Version" target="_blank">Node
+            Version</a>
+      </li>
+      <li>
+         <a href="https://github.com/homebridge-plugins/homebridge-firstalert/wiki/Uninstallation"
+            target="_blank">Uninstallation</a>
+      </li>
+   </ul>
+   <h5>Features</h5>
+   <ul>
+      <li>
+         <a href="https://github.com/homebridge-plugins/homebridge-firstalert/wiki/Supported-Devices"
+            target="_blank">Supported
+            Devices</a>
+      </li>
+      <li>
+         <a href="https://github.com/homebridge-plugins/homebridge-firstalert/wiki/Fan-Modes" target="_blank">Fan
+            Modes</a>
+      </li>
+   </ul>
+   <h5>Help/About</h5>
+   <ul>
+      <li>
+         <a href="https://github.com/homebridge-plugins/homebridge-firstalert/issues/new/choose" target="_blank">Support
+            Request</a>
+      </li>
+      <li>
+         <a href="https://github.com/homebridge-plugins/homebridge-firstalert/blob/latest/CHANGELOG.md"
+            target="_blank">Changelog</a>
+      </li>
+      <li>
+         <a href="https://github.com/sponsors/donavanbecker" target="_blank">About Me</a>
+      </li>
+   </ul>
+   <h5>Disclaimer</h5>
+   <ul>
+      <li>
+         I am in no way affiliated with FirstAlert and this plugin is a personal project that I maintain in
+         my free time.
+      </li>
+      <li>
+         Use this plugin entirely at your own risk - please see licence for more information.
+      </li>
+   </ul>
+</div>
+<script type="module" src="./js/ui.js"></script>

@@ -1,0 +1,67 @@
+/* homebridge-firstalert UI custom styles */
+
+body {
+  background: #f8fafc;
+  font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
+}
+
+#firstalert-logo {
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  width: 120px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+h2 {
+  color: #d32f2f;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.btn-primary {
+  background: #d32f2f;
+  border: none;
+}
+
+.btn-primary:hover, .btn-primary:focus {
+  background: #b71c1c;
+}
+
+.alert-info {
+  background: #e3f2fd;
+  color: #1565c0;
+  border: 1px solid #90caf9;
+}
+
+.alert-success {
+  background: #e8f5e9;
+  color: #388e3c;
+  border: 1px solid #a5d6a7;
+}
+
+pre#loginLogs {
+  background: #222;
+  color: #eee;
+  border-radius: 6px;
+  padding: 1em;
+  font-size: 0.95em;
+}
+
+input.form-control {
+  border-radius: 6px;
+  border: 1px solid #bdbdbd;
+}
+
+.table th, .table td {
+  vertical-align: middle;
+}
+
+@media (max-width: 600px) {
+  #firstalert-logo {
+    width: 80px;
+  }
+  .table {
+    font-size: 0.95em;
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "pluginAlias": "FirstAlert",
+  "pluginType": "platform",
+  "singular": true,
+  "customUi": true,
+  "customUiPath": "./dist/homebridge-ui",
+  "headerDisplay": "<p align='center'><img width='250px' src='https://user-images.githubusercontent.com/3979615/71876008-d99d7400-3179-11ea-909b-9d2a3d1e670f.png'></p>\n\nThe **Homebridge FirstAlert** plugin allows you to control FirstAlert thermostats and also view your Leak Sensors from HomeKit. \n\nTo get started link your FirstAlert account using the button below.",
+  "footerDisplay": "Your FirstAlert account has been linked. Please raise any issues on our [project page](https://github.com/homebridge-plugins/homebridge-FirstAlert/issues).\n\nIf you would like to have other FirstAlert Devices besides Thermostat, or Leak Sensors added to this plugin fill out [Feature Request Form](https://github.com/homebridge-plugins/homebridge-FirstAlert/issues/new?assignees=&labels=&template=feature_request.md).",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "title": "Name",
+        "default": "FirstAlert"
+      },
+      "refreshToken": {
+        "type": "string",
+        "title": "Refresh Token",
+        "description": "OAuth refresh token for FirstAlert API. Use the button below to log in and obtain this token.",
+        "ui:widget": "password"
+      },
+      "pollInterval": {
+        "type": "integer",
+        "title": "Polling Interval (seconds)",
+        "default": 60,
+        "minimum": 5,
+        "maximum": 3600,
+        "description": "How often to poll device state (5-3600 seconds)."
+      }
+    },
+    "required": [
+      "refreshToken"
+    ],
+    "ui:order": [
+      "refreshToken",
+      "pollInterval"
+    ],
+    "ui:options": {
+      "refreshToken": {
+        "ui:button": {
+          "label": "Login with FirstAlert",
+          "action": "startOAuthFlow"
+        }
+      }
+    }
+  },
+  "layout": [
+    {
+      "type": "fieldset",
+      "title": "FirstAlert Account Info",
+      "expandable": true,
+      "expanded": false,
+      "items": [
+        {
+          "type": "help",
+          "helpvalue": "<h5></h5><em class='primary-text'>This is for Manual Setup Only.</em>"
+        },
+        "refreshToken"
+      ]
+    }
+  ]
+}

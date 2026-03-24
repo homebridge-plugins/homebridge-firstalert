@@ -1,0 +1,182 @@
+// FirstAlert API client for OAuth and device polling
+// Implements token refresh, account/device fetch, and strong typing
+
+import { request } from 'undici'
+
+export interface ResideoDevice {
+  id: string
+  name: string
+  deviceId: string
+  globalDeviceType: string
+}
+
+export interface ResideoAccount {
+  id: string
+  firstName: string
+  lastName: string
+  contactEmail: string
+  countryCode: string
+  locale: string
+  devices: ResideoDevice[]
+}
+
+export interface ResideoDeviceState {
+  name: string
+  deviceType: string
+  isOnline: boolean
+  deviceState: any
+}
+
+export class ResideoClient {
+  private clientId = 'SRmiA7CaYi1JgivDZdzzoZu4X5VBogGt'
+  private refreshToken: string
+  private accessToken: string | null = null
+  private logger: any
+
+  constructor(refreshToken: string, logger: any) {
+    this.refreshToken = refreshToken
+    this.logger = logger
+    this.logger.debug('[ResideoClient] Initialized with refreshToken:', refreshToken ? '***' : 'none')
+  }
+
+  /**
+   * Set the state of a valve device (open/closed)
+   */
+  async setValveState(deviceId: string, payload: any): Promise<any> {
+    this.logger.debug(`[ResideoClient] Setting valve state for deviceId: ${deviceId} with payload:`, JSON.stringify(payload))
+    const token = await this.getAccessToken()
+    try {
+      const { body: resBody } = await request(`https://api.resideo.com/ris-public-api/api/v2/devices/valves/${deviceId}/state`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+      const resp = await resBody.json()
+      this.logger.debug(`[ResideoClient] Valve state set response for ${deviceId}:`, JSON.stringify(resp))
+      return resp
+    } catch (err) {
+      this.logger.error(`[ResideoClient] Error setting valve state for ${deviceId}:`, err)
+      throw err
+    }
+  }
+
+  /**
+   * Set the state of a thermostat device
+   */
+  async setThermostatState(deviceId: string, payload: any): Promise<any> {
+    this.logger.debug(`[ResideoClient] Setting thermostat state for deviceId: ${deviceId} with payload:`, JSON.stringify(payload))
+    const token = await this.getAccessToken()
+    try {
+      const { body: resBody } = await request(`https://api.resideo.com/ris-public-api/api/v2/devices/thermostats/${deviceId}/state`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+      const resp = await resBody.json()
+      this.logger.debug(`[ResideoClient] Thermostat state set response for ${deviceId}:`, JSON.stringify(resp))
+      return resp
+    } catch (err) {
+      this.logger.error(`[ResideoClient] Error setting thermostat state for ${deviceId}:`, err)
+      throw err
+    }
+  }
+
+  async refreshAccessToken(): Promise<string> {
+    this.logger.debug('[ResideoClient] Refreshing access token...')
+    const body = JSON.stringify({
+      grant_type: 'refresh_token',
+      refresh_token: this.refreshToken,
+      client_id: this.clientId,
+    })
+    try {
+      const { body: resBody } = await request('https://login.resideo.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+      const data = await resBody.json() as { access_token?: string }
+      this.accessToken = data.access_token ?? ''
+      if (!this.accessToken) {
+        this.logger.error('[ResideoClient] Failed to obtain access token from Resideo API')
+        throw new Error('Failed to obtain access token from Resideo API')
+      }
+      this.logger.debug('[ResideoClient] Access token obtained:', `${this.accessToken.substring(0, 8)}...`)
+      return this.accessToken
+    } catch (err) {
+      this.logger.error('[ResideoClient] Error refreshing access token:', err)
+      throw err
+    }
+  }
+
+  async getAccessToken(): Promise<string> {
+    if (!this.accessToken) {
+      this.logger.debug('[ResideoClient] No cached access token, refreshing...')
+      await this.refreshAccessToken()
+    }
+    return this.accessToken!
+  }
+
+  async getAccount(): Promise<ResideoAccount> {
+    this.logger.debug('[ResideoClient] Fetching account info...')
+    const token = await this.getAccessToken()
+    try {
+      const { body: resBody } = await request('https://api.resideo.com/ris-public-api/api/v1/accounts', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const resp = await resBody.json() as { data: any }
+      // Parse and flatten devices
+      const data = resp.data
+      this.logger.debug('[ResideoClient] Account countryCode:', data.countryCode, 'locale:', data.locale)
+      const devices: ResideoDevice[] = []
+      for (const user of data.consumerUsers) {
+        for (const loc of user.consumerAccount.locations) {
+          for (const dev of loc.consumerDevices) {
+            devices.push({
+              id: dev.id,
+              name: dev.name,
+              deviceId: dev.device.deviceId,
+              globalDeviceType: dev.device.globalDeviceType,
+            })
+          }
+        }
+      }
+      this.logger.debug(`[ResideoClient] Found ${devices.length} devices.`)
+      return {
+        id: data.id,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        contactEmail: data.contactEmail,
+        countryCode: data.countryCode,
+        locale: data.locale,
+        devices,
+      }
+    } catch (err) {
+      this.logger.error('[ResideoClient] Error fetching account info:', err)
+      throw err
+    }
+  }
+
+  async getDeviceState(deviceId: string): Promise<ResideoDeviceState> {
+    this.logger.debug(`[ResideoClient] Fetching device state for deviceId: ${deviceId}`)
+    const token = await this.getAccessToken()
+    try {
+      const { body: resBody } = await request(`https://api.resideo.com/ris-public-api/api/v2/devices/smokeDetectors/${deviceId}/state`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const state = await resBody.json() as ResideoDeviceState
+      this.logger.debug(`[ResideoClient] Device state for ${deviceId}:`, JSON.stringify(state))
+      return state
+    } catch (err) {
+      this.logger.error(`[ResideoClient] Error fetching device state for ${deviceId}:`, err)
+      throw err
+    }
+  }
+}
