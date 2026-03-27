@@ -1,9 +1,20 @@
+/* eslint-disable no-console */
+// Minimal logger for UI server context
 import { HomebridgePluginUiServer } from '@homebridge/plugin-ui-utils'
 import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import { URLSearchParams } from 'node:url'
 import { request as undiciRequest } from 'undici'
+
+import { ResideoClient } from '../api/resideoClient.js'
+
+const uiLogger = {
+  debug: (...args: any[]) => console.debug('[UI]', ...args),
+  info: (...args: any[]) => console.info('[UI]', ...args),
+  warn: (...args: any[]) => console.warn('[UI]', ...args),
+  error: (...args: any[]) => console.error('[UI]', ...args),
+}
 
 // Resideo/First Alert constants
 const OAUTH_CLIENT_ID = 'SRmiA7CaYi1JgivDZdzzoZu4X5VBogGt'
@@ -15,11 +26,32 @@ const AUDIENCE = 'https://resideo-prod.auth0.com/api/v2/'
 const SCOPE = 'openid profile email offline_access'
 const AUTH0_CLIENT_APP = 'eyJ2ZXJzaW9uIjoiMS4xNC4wIiwibmFtZSI6ImF1dGgwLWZsdXR0ZXIiLCJlbnYiOnsiY29yZSI6IjIuMTAuMCIsImlPUyI6IjI2LjEiLCJzd2lmdCI6IjUueCJ9fQ'
 
-// Regexes moved to module scope
-
 class PluginUiServer extends HomebridgePluginUiServer {
   constructor() {
     super()
+
+    // Resideo device discovery handler
+    this.onRequest('discoverResideoDevices', async (payload): Promise<CustomRequestResponse> => {
+      try {
+        const { refreshToken } = payload || {}
+        if (!refreshToken) {
+          uiLogger.error('[discoverResideoDevices] No refresh token provided')
+          return { status: 'error', data: 'No refresh token provided' }
+        }
+        // Use statically imported ResideoClient
+        const client = new ResideoClient(refreshToken, uiLogger)
+        const account = await client.getAccount()
+        uiLogger.info('[discoverResideoDevices] Raw account response:', JSON.stringify(account, null, 2))
+        if (!account || !Array.isArray(account.devices) || account.devices.length === 0) {
+          uiLogger.warn('[discoverResideoDevices] No devices found in account:', JSON.stringify(account, null, 2))
+        }
+        // Optionally cache account.devices here if needed
+        return { status: 'ok', data: account.devices }
+      } catch (err) {
+        uiLogger.error('[discoverResideoDevices] Error:', err)
+        return { status: 'error', data: (err && typeof err === 'object' && 'message' in err) ? (err as any).message : String(err) }
+      }
+    })
 
     // Resideo Auth (PKCE OAuth 2.0 browser-based flow)
     this.onRequest('startResideoAuth', async (payload: any): Promise<CustomRequestResponse> => {

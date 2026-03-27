@@ -20,7 +20,10 @@
     "skipLibCheck": true
   },
   "include": [
-    "src"
+    "src",
+    "src/**/*.ts",
+    "src/homebridge-ui/*.ts",
+    "src/homebridge-ui/**/*.ts"
   ],
   "exclude": [
     "**/*.spec.ts"

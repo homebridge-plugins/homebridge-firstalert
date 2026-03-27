@@ -156,4 +156,8 @@ dist
 # Homebridge Testing
 
 persist/
-.DS_Store
+
+# DS_Store files
+
+.DS_Store*
+src/.DS_Store*

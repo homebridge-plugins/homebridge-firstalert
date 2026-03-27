@@ -21,6 +21,85 @@ declare const homebridge: any;
     let codeVerifier: string | null = null
     let state: string | null = null
 
+    // Device discovery UI elements
+    const pageDevices = document.getElementById('pageDevices') as HTMLElement | null
+    const deviceSelect = document.getElementById('deviceSelect') as HTMLSelectElement | null
+    const deviceTable = document.getElementById('deviceTable') as HTMLTableElement | null
+    const deviceID = document.getElementById('deviceID') as HTMLElement | null
+    const displayName = document.getElementById('displayName') as HTMLElement | null
+    const model = document.getElementById('model') as HTMLElement | null
+    const firmwareRevision = document.getElementById('firmwareRevision') as HTMLElement | null
+
+    // Helper to show device info
+    function showDeviceInfo(device: any) {
+      if (!device) {
+        return
+      }
+      deviceID && (deviceID.textContent = device.deviceID || device.deviceId || '')
+      displayName && (displayName.textContent = device.name || device.displayName || device.deviceType || '')
+      model && (model.textContent = device.model || device.deviceType || '')
+      firmwareRevision && (firmwareRevision.textContent = device.firmwareVersion || device.firmwareRevision || '')
+      deviceTable && (deviceTable.style.display = 'table')
+    }
+
+    // Discover devices and populate UI
+    async function discoverDevices(refreshToken: string) {
+      if (!pageDevices) {
+        return
+      }
+      try {
+        pageDevices.style.display = 'block'
+        if (deviceSelect) {
+          deviceSelect.innerHTML = '<option>Loading...</option>'
+        }
+        // Use the modern Homebridge API to get cached accessories
+        const cachedAccessories = await homebridge.getCachedAccessories()
+        // Filter for this plugin's accessories (by plugin name)
+        const pluginName = '@homebridge-plugins/homebridge-firstalert'
+        let devices = Array.isArray(cachedAccessories)
+          ? cachedAccessories.filter((acc: any) => acc.plugin === pluginName)
+          : []
+        // If no cached devices, fallback to Resideo API
+        if (!devices.length) {
+          homebridge.toast.info('No cached devices found, querying Resideo API...', 'Device Discovery')
+          const result = await homebridge.request('discoverResideoDevices', { refreshToken })
+          devices = Array.isArray(result.data) ? result.data : []
+        } else {
+          homebridge.toast.success(`Loaded ${devices.length} device(s) from cache.`, 'Device Discovery')
+        }
+        if (devices.length) {
+          if (deviceSelect) {
+            deviceSelect.innerHTML = ''
+            devices.forEach((dev: any, idx: number) => {
+              const opt = document.createElement('option')
+              opt.value = idx.toString()
+              opt.text = dev.name || dev.displayName || dev.deviceType || dev.deviceId || 'Device'
+              deviceSelect.appendChild(opt)
+            })
+            deviceSelect.onchange = () => {
+              const selIdx = Number.parseInt(deviceSelect.value, 10)
+              showDeviceInfo(devices[selIdx])
+            }
+            // Show first device by default
+            if (devices.length > 0) {
+              deviceSelect.value = '0'
+              showDeviceInfo(devices[0])
+            }
+          }
+        } else {
+          if (deviceSelect) {
+            deviceSelect.innerHTML = '<option>No devices found</option>'
+          }
+          homebridge.toast.warning('No devices found in cache or from Resideo API.', 'Device Discovery')
+        }
+      } catch (err: any) {
+        if (deviceSelect) {
+          deviceSelect.innerHTML = '<option>Error loading devices</option>'
+        }
+        homebridge.toast.error(`Failed to discover devices: ${err?.message || err}`, 'Error')
+      }
+    }
+
     // Show correct section
     if (hasRefresh) {
       loginForm && (loginForm.style.display = 'none')
@@ -128,6 +207,10 @@ declare const homebridge: any;
             if (logs) {
               logs.textContent += 'Successfully linked account.\n'
             }
+            // After linking, discover devices
+            if (config[0].refreshToken) {
+              await discoverDevices(config[0].refreshToken)
+            }
           } else {
             const errMsg = `Token exchange failed: ${result.data?.error_description || result.data || 'Unknown error'}`
             homebridge.toast.error(errMsg, 'Error')
@@ -158,6 +241,7 @@ declare const homebridge: any;
           await homebridge.savePluginConfig()
           unlinkSection && (unlinkSection.style.display = 'none')
           loginForm && (loginForm.style.display = 'block')
+          pageDevices && (pageDevices.style.display = 'none')
           homebridge.toast.success('Account unlinked', 'homebridge-firstalert')
         } catch (err: any) {
           homebridge.toast.error(`Unlink failed: ${err?.message || err}`, 'Error')
@@ -165,6 +249,10 @@ declare const homebridge: any;
           homebridge.hideSpinner()
         }
       }
+    }
+    // If already linked, show devices on load
+    if (hasRefresh && config[0]?.refreshToken) {
+      await discoverDevices(config[0].refreshToken)
     }
   } catch (err: any) {
     homebridge.toast.error(err.message, 'Error')
