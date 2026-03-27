@@ -6,7 +6,6 @@ import type { ResideoPlatform } from '../platform.js'
  */
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge'
 
-// import { request } from 'undici';
 import { interval, Subject } from 'rxjs'
 import { skipWhile } from 'rxjs/operators'
 
@@ -143,17 +142,17 @@ export class Thermostats extends deviceBase {
    * Parse the device status from the FirstAlert api
    */
   async parseStatus(): Promise<void> {
-    this.logDebug('Parsing Thermostat status from device:', JSON.stringify(this.device))
-    // Example: parse state from API response (simulate for now)
-    // In a real implementation, fetch and parse state from the API
-    // For now, just set some dummy values
-    this.Thermostat.CurrentTemperature = 21
-    this.Thermostat.TargetTemperature = 21
-    this.Thermostat.TemperatureDisplayUnits = this.hap.Characteristic.TemperatureDisplayUnits.CELSIUS
-    this.Thermostat.TargetHeatingCoolingState = this.hap.Characteristic.TargetHeatingCoolingState.AUTO
-    this.Thermostat.CurrentHeatingCoolingState = this.hap.Characteristic.CurrentHeatingCoolingState.OFF
-    this.Thermostat.HeatingThresholdTemperature = 20
-    this.Thermostat.CoolingThresholdTemperature = 24
+    this.logDebug('Parsing Thermostat status from API state:', JSON.stringify(this.state))
+    // Map API state to HomeKit characteristics
+    const s = this.state || {}
+    // These property names may need to be adjusted to match the actual API response
+    this.Thermostat.CurrentTemperature = s.currentTemperature ?? this.Thermostat.CurrentTemperature
+    this.Thermostat.TargetTemperature = s.targetTemperature ?? this.Thermostat.TargetTemperature
+    this.Thermostat.TemperatureDisplayUnits = s.temperatureDisplayUnits ?? this.Thermostat.TemperatureDisplayUnits
+    this.Thermostat.TargetHeatingCoolingState = s.targetHeatingCoolingState ?? this.Thermostat.TargetHeatingCoolingState
+    this.Thermostat.CurrentHeatingCoolingState = s.currentHeatingCoolingState ?? this.Thermostat.CurrentHeatingCoolingState
+    this.Thermostat.HeatingThresholdTemperature = s.heatingThresholdTemperature ?? this.Thermostat.HeatingThresholdTemperature
+    this.Thermostat.CoolingThresholdTemperature = s.coolingThresholdTemperature ?? this.Thermostat.CoolingThresholdTemperature
     this.logDebug('Thermostat status parsed:', {
       CurrentTemperature: this.Thermostat.CurrentTemperature,
       TargetTemperature: this.Thermostat.TargetTemperature,
@@ -191,15 +190,24 @@ export class Thermostats extends deviceBase {
    */
   async pushChanges(): Promise<void> {
     try {
+      this.logInfo(`Thermostat ${this.accessory.displayName}: pushChanges called, attempting to set state.`)
+      this.logInfo(`Thermostat ${this.accessory.displayName}: deviceId=${this.device.deviceId}, globalDeviceType=${this.device.globalDeviceType}`)
       const payload = {
         targetTemperature: this.Thermostat.TargetTemperature,
         heatingThresholdTemperature: this.Thermostat.HeatingThresholdTemperature,
         coolingThresholdTemperature: this.Thermostat.CoolingThresholdTemperature,
         targetHeatingCoolingState: this.Thermostat.TargetHeatingCoolingState,
       }
-      this.logDebug(`Sending thermostat payload to API: ${JSON.stringify(payload)}`)
-      const resp = await this.platform.client.setThermostatState(this.device.deviceId, payload)
-      this.logDebug(`Thermostat ${this.accessory.displayName} pushChanges response: ${JSON.stringify(resp)}`)
+      this.logDebug(`Thermostat ${this.accessory.displayName}: Sending payload to API: ${JSON.stringify(payload)}`)
+      const resp = await this.platform.client.setThermostatState(this.device.deviceId, payload, this.device.globalDeviceType)
+      this.logDebug(`Thermostat ${this.accessory.displayName}: pushChanges API response: ${JSON.stringify(resp)}`)
+      if (!resp || (typeof resp === 'object' && Object.keys(resp).length === 0)) {
+        this.logWarn(`Thermostat ${this.accessory.displayName}: API response is empty or missing expected data after pushChanges.`)
+      } else if (resp.error || resp.status === 'error') {
+        this.logError(`Thermostat ${this.accessory.displayName}: API reported error in response: ${JSON.stringify(resp)}`)
+      } else {
+        this.logInfo(`Thermostat ${this.accessory.displayName}: pushChanges command sent successfully, response: ${JSON.stringify(resp)}`)
+      }
       const action = 'pushChanges'
       await this.statusCode(200, action)
     } catch (e: any) {

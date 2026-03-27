@@ -99,10 +99,18 @@ export class Valve extends deviceBase {
 
   async parseStatus(device: ResideoDevice): Promise<void> {
     this.logDebug('Parsing Valve status from device:', JSON.stringify(device))
-    // Assume device is online if globalDeviceType is present (customize as needed)
-    const newActive = this.hap.Characteristic.Active.ACTIVE
-    const newInUse = this.hap.Characteristic.InUse.NOT_IN_USE
-
+    // Use API state for Active and InUse
+    // Example: device.state could be 'open' or 'closed', device.inUse could be true/false
+    // Fallback to previous values if not present
+    const d: any = device
+    let newActive = this.hap.Characteristic.Active.INACTIVE
+    let newInUse = this.hap.Characteristic.InUse.NOT_IN_USE
+    if (typeof d.state === 'string') {
+      newActive = d.state.toLowerCase() === 'open' ? this.hap.Characteristic.Active.ACTIVE : this.hap.Characteristic.Active.INACTIVE
+    }
+    if (typeof d.inUse === 'boolean') {
+      newInUse = d.inUse ? this.hap.Characteristic.InUse.IN_USE : this.hap.Characteristic.InUse.NOT_IN_USE
+    }
     // Only update if state has changed
     let stateChanged = false
     if (this.Valve.Active !== newActive) {
@@ -134,8 +142,8 @@ export class Valve extends deviceBase {
       const deviceState = await this.platform.client.getDeviceState(deviceId)
       this.logDebug(`Valve ${this.accessory.displayName} (refreshStatus) device: ${JSON.stringify(deviceState)}`)
       this.device = { ...this.device, ...deviceState }
-      this.parseStatus(this.device as ResideoDevice)
-      this.updateHomeKitCharacteristics()
+      await this.parseStatus(this.device as ResideoDevice)
+      await this.updateHomeKitCharacteristics()
       this.logDebug('Valve refresh and update complete.')
     } catch (e: any) {
       const action = 'refreshStatus'
@@ -147,12 +155,22 @@ export class Valve extends deviceBase {
 
   async pushChanges(): Promise<void> {
     try {
+      const actionType = this.Valve.Active === this.hap.Characteristic.Active.ACTIVE ? 'open' : 'closed'
+      this.logInfo(`Valve ${this.accessory.displayName}: pushChanges called, attempting to set state to '${actionType}'.`)
+      this.logInfo(`Valve ${this.accessory.displayName}: deviceId=${this.device.deviceId}, globalDeviceType=${this.device.globalDeviceType}`)
       const payload: payload = {
-        state: this.Valve.Active === this.hap.Characteristic.Active.ACTIVE ? 'open' : 'closed',
+        state: actionType,
       }
-      this.logDebug(`Sending payload to API: ${JSON.stringify(payload)}`)
-      const resp = await this.platform.client.setValveState(this.device.deviceId, payload)
-      this.logDebug(`Valve ${this.accessory.displayName} pushChanges response: ${JSON.stringify(resp)}`)
+      this.logDebug(`Valve ${this.accessory.displayName}: Sending payload to API: ${JSON.stringify(payload)}`)
+      const resp = await this.platform.client.setValveState(this.device.deviceId, payload, this.device.globalDeviceType)
+      this.logDebug(`Valve ${this.accessory.displayName}: pushChanges API response: ${JSON.stringify(resp)}`)
+      if (!resp || (typeof resp === 'object' && Object.keys(resp).length === 0)) {
+        this.logWarn(`Valve ${this.accessory.displayName}: API response is empty or missing expected data after pushChanges.`)
+      } else if (resp.error || resp.status === 'error') {
+        this.logError(`Valve ${this.accessory.displayName}: API reported error in response: ${JSON.stringify(resp)}`)
+      } else {
+        this.logInfo(`Valve ${this.accessory.displayName}: pushChanges command sent successfully, response: ${JSON.stringify(resp)}`)
+      }
       const action = 'pushChanges'
       await this.statusCode(200, action)
     } catch (e: any) {

@@ -57,6 +57,9 @@ export class LeakSensor extends deviceBase {
     CurrentTemperature: CharacteristicValue
   }
 
+  // API state cache
+  private state: any = {}
+
   // Sensor Update
   SensorUpdateInProgress!: boolean
   doSensorUpdate!: Subject<void>
@@ -158,21 +161,25 @@ export class LeakSensor extends deviceBase {
    * Parse the device status from the FirstAlert api
    */
   async parseStatus(): Promise<void> {
-    this.logDebug('Parsing LeakSensor status from device:', JSON.stringify(this.device))
-    // Example: parse state from API response (simulate for now)
-    // In a real implementation, fetch and parse state from the API
-    // For now, just set some dummy values
-    this.Battery.BatteryLevel = 100
-    this.Battery.StatusLowBattery = this.hap.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
+    this.logDebug('Parsing LeakSensor status from API state:', JSON.stringify(this.state))
+    const s = this.state || {}
+    this.Battery.BatteryLevel = s.batteryLevel ?? this.Battery.BatteryLevel
+    // Ensure BatteryLevel is a number for comparison
+    const batteryLevelNum = typeof this.Battery.BatteryLevel === 'number'
+      ? this.Battery.BatteryLevel
+      : Number(this.Battery.BatteryLevel) || 100
+    this.Battery.StatusLowBattery = (batteryLevelNum < 15)
+      ? this.hap.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW
+      : this.hap.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
     if (this.LeakSensor) {
-      this.LeakSensor.StatusActive = true
-      this.LeakSensor.LeakDetected = this.hap.Characteristic.LeakDetected.LEAK_NOT_DETECTED
+      this.LeakSensor.StatusActive = s.statusActive ?? this.LeakSensor.StatusActive
+      this.LeakSensor.LeakDetected = s.leakDetected ?? this.LeakSensor.LeakDetected
     }
     if (this.TemperatureSensor) {
-      this.TemperatureSensor.CurrentTemperature = 20
+      this.TemperatureSensor.CurrentTemperature = s.currentTemperature ?? this.TemperatureSensor.CurrentTemperature
     }
     if (this.HumiditySensor) {
-      this.HumiditySensor.CurrentRelativeHumidity = 50
+      this.HumiditySensor.CurrentRelativeHumidity = s.currentRelativeHumidity ?? this.HumiditySensor.CurrentRelativeHumidity
     }
     this.logDebug('LeakSensor status parsed:', {
       BatteryLevel: this.Battery.BatteryLevel,
@@ -193,7 +200,8 @@ export class LeakSensor extends deviceBase {
       const deviceId = String(this.device.deviceId)
       const deviceState = await this.platform.client.getDeviceState(deviceId)
       this.logDebug('Received LeakSensor device state from API:', JSON.stringify(deviceState))
-      // In a real implementation, parse deviceState and update class state
+      // Store state for parseStatus
+      this.state = deviceState.deviceState || {}
       await this.parseStatus()
       await this.updateHomeKitCharacteristics()
       this.logDebug('LeakSensor refresh and update complete.')

@@ -42,11 +42,14 @@ export class ResideoClient {
   /**
    * Set the state of a valve device (open/closed)
    */
-  async setValveState(deviceId: string, payload: any): Promise<any> {
-    this.logger.debug(`[ResideoClient] Setting valve state for deviceId: ${deviceId} with payload:`, JSON.stringify(payload))
+  async setValveState(deviceId: string, payload: any, globalDeviceType?: string): Promise<any> {
+    this.logger.debug(`[ResideoClient] Setting valve state for deviceId: ${deviceId} (type: ${globalDeviceType}) with payload:`, JSON.stringify(payload))
     const token = await this.getAccessToken()
+    const endpoint = (globalDeviceType === 'ShutoffValve_L7_T' || globalDeviceType === 'SmartMeterValve')
+      ? `https://api.resideo.com/ris-public-api/api/v2/devices/shutoffvalves/${deviceId}/state`
+      : `https://api.resideo.com/ris-public-api/api/v2/devices/valves/${deviceId}/state`
     try {
-      const { body: resBody } = await request(`https://api.resideo.com/ris-public-api/api/v2/devices/valves/${deviceId}/state`, {
+      const { body: resBody } = await request(endpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -54,7 +57,18 @@ export class ResideoClient {
         },
         body: JSON.stringify(payload),
       })
-      const resp = await resBody.json()
+      const text = await resBody.text()
+      if (!text) {
+        this.logger.error(`[ResideoClient] Empty response when setting valve state for ${deviceId}`)
+        throw new Error('Empty response from Resideo API')
+      }
+      let resp
+      try {
+        resp = JSON.parse(text)
+      } catch (parseErr) {
+        this.logger.error(`[ResideoClient] Failed to parse valve state response for ${deviceId}:`, text)
+        throw parseErr
+      }
       this.logger.debug(`[ResideoClient] Valve state set response for ${deviceId}:`, JSON.stringify(resp))
       return resp
     } catch (err) {
@@ -66,11 +80,16 @@ export class ResideoClient {
   /**
    * Set the state of a thermostat device
    */
-  async setThermostatState(deviceId: string, payload: any): Promise<any> {
-    this.logger.debug(`[ResideoClient] Setting thermostat state for deviceId: ${deviceId} with payload:`, JSON.stringify(payload))
+  async setThermostatState(deviceId: string, payload: any, globalDeviceType?: string): Promise<any> {
+    this.logger.debug(`[ResideoClient] Setting thermostat state for deviceId: ${deviceId} (type: ${globalDeviceType}) with payload:`, JSON.stringify(payload))
     const token = await this.getAccessToken()
+    const endpoint = `https://api.resideo.com/ris-public-api/api/v2/devices/thermostats/${deviceId}/state`
+    // Endpoint selection logic for other thermostat types (future-proof)
+    // if (globalDeviceType === 'SomeOtherThermostatType') {
+    //   endpoint = `...`
+    // }
     try {
-      const { body: resBody } = await request(`https://api.resideo.com/ris-public-api/api/v2/devices/thermostats/${deviceId}/state`, {
+      const { body: resBody } = await request(endpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -78,7 +97,18 @@ export class ResideoClient {
         },
         body: JSON.stringify(payload),
       })
-      const resp = await resBody.json()
+      const text = await resBody.text()
+      if (!text) {
+        this.logger.error(`[ResideoClient] Empty response when setting thermostat state for ${deviceId}`)
+        throw new Error('Empty response from Resideo API')
+      }
+      let resp
+      try {
+        resp = JSON.parse(text)
+      } catch (parseErr) {
+        this.logger.error(`[ResideoClient] Failed to parse thermostat state response for ${deviceId}:`, text)
+        throw parseErr
+      }
       this.logger.debug(`[ResideoClient] Thermostat state set response for ${deviceId}:`, JSON.stringify(resp))
       return resp
     } catch (err) {
@@ -100,7 +130,18 @@ export class ResideoClient {
         headers: { 'Content-Type': 'application/json' },
         body,
       })
-      const data = await resBody.json() as { access_token?: string }
+      const text = await resBody.text()
+      if (!text) {
+        this.logger.error('[ResideoClient] Empty response when refreshing access token')
+        throw new Error('Empty response from Resideo API')
+      }
+      let data: { access_token?: string }
+      try {
+        data = JSON.parse(text)
+      } catch (parseErr) {
+        this.logger.error('[ResideoClient] Failed to parse access token response:', text)
+        throw parseErr
+      }
       this.accessToken = data.access_token ?? ''
       if (!this.accessToken) {
         this.logger.error('[ResideoClient] Failed to obtain access token from Resideo API')
@@ -130,7 +171,18 @@ export class ResideoClient {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
       })
-      const resp = await resBody.json() as { data: any }
+      const text = await resBody.text()
+      if (!text) {
+        this.logger.error('[ResideoClient] Empty response when fetching account info')
+        throw new Error('Empty response from Resideo API')
+      }
+      let resp: { data: any }
+      try {
+        resp = JSON.parse(text)
+      } catch (parseErr) {
+        this.logger.error('[ResideoClient] Failed to parse account info response:', text)
+        throw parseErr
+      }
       // Parse and flatten devices
       const data = resp.data
       this.logger.debug('[ResideoClient] Account countryCode:', data.countryCode, 'locale:', data.locale)
@@ -171,7 +223,18 @@ export class ResideoClient {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
       })
-      const state = await resBody.json() as ResideoDeviceState
+      const text = await resBody.text()
+      if (!text) {
+        this.logger.error(`[ResideoClient] Empty response when fetching device state for ${deviceId}`)
+        throw new Error('Empty response from Resideo API')
+      }
+      let state: ResideoDeviceState
+      try {
+        state = JSON.parse(text)
+      } catch (parseErr) {
+        this.logger.error(`[ResideoClient] Failed to parse device state response for ${deviceId}:`, text)
+        throw parseErr
+      }
       this.logger.debug(`[ResideoClient] Device state for ${deviceId}:`, JSON.stringify(state))
       return state
     } catch (err) {
