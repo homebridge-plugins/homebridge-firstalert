@@ -166,8 +166,8 @@ export class Valve extends deviceBase {
       this.logDebug(`Valve ${this.accessory.displayName}: pushChanges API response: ${JSON.stringify(resp)}`)
       if (!resp || (typeof resp === 'object' && Object.keys(resp).length === 0)) {
         this.logWarn(`Valve ${this.accessory.displayName}: API response is empty or missing expected data after pushChanges.`)
-      } else if (resp.error || resp.status === 'error') {
-        this.logError(`Valve ${this.accessory.displayName}: API reported error in response: ${JSON.stringify(resp)}`)
+      } else if (resp.error || resp.status === 'error' || (resp.statusCode && resp.statusCode >= 400)) {
+        this.logError(`Valve ${this.accessory.displayName}: API reported error or bad status in response: ${JSON.stringify(resp)}`)
       } else {
         this.logInfo(`Valve ${this.accessory.displayName}: pushChanges command sent successfully, response: ${JSON.stringify(resp)}`)
       }

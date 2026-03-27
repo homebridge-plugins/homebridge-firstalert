@@ -28,6 +28,21 @@ export interface ResideoDeviceState {
 }
 
 export class ResideoClient {
+  /**
+   * Debug utility: Log all device IDs and types from account
+   */
+  async logAllDeviceTypes(): Promise<void> {
+    try {
+      const account = await this.getAccount()
+      this.logger.info('[ResideoClient] Device list:')
+      for (const device of account.devices) {
+        this.logger.info(`  deviceId=${device.deviceId}, globalDeviceType=${device.globalDeviceType}, name=${device.name}`)
+      }
+    } catch (err) {
+      this.logger.error('[ResideoClient] Failed to log all device types:', err)
+    }
+  }
+
   private clientId = 'SRmiA7CaYi1JgivDZdzzoZu4X5VBogGt'
   private refreshToken: string
   private accessToken: string | null = null
@@ -83,38 +98,62 @@ export class ResideoClient {
   async setThermostatState(deviceId: string, payload: any, globalDeviceType?: string): Promise<any> {
     this.logger.debug(`[ResideoClient] Setting thermostat state for deviceId: ${deviceId} (type: ${globalDeviceType}) with payload:`, JSON.stringify(payload))
     const token = await this.getAccessToken()
-    const endpoint = `https://api.resideo.com/ris-public-api/api/v2/devices/thermostats/${deviceId}/state`
-    // Endpoint selection logic for other thermostat types (future-proof)
-    // if (globalDeviceType === 'SomeOtherThermostatType') {
-    //   endpoint = `...`
-    // }
-    try {
-      const { body: resBody } = await request(endpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      })
-      const text = await resBody.text()
-      if (!text) {
-        this.logger.error(`[ResideoClient] Empty response when setting thermostat state for ${deviceId}`)
-        throw new Error('Empty response from Resideo API')
-      }
-      let resp
-      try {
-        resp = JSON.parse(text)
-      } catch (parseErr) {
-        this.logger.error(`[ResideoClient] Failed to parse thermostat state response for ${deviceId}:`, text)
-        throw parseErr
-      }
-      this.logger.debug(`[ResideoClient] Thermostat state set response for ${deviceId}:`, JSON.stringify(resp))
-      return resp
-    } catch (err) {
-      this.logger.error(`[ResideoClient] Error setting thermostat state for ${deviceId}:`, err)
-      throw err
+    // Try multiple endpoints for special thermostat types
+    const endpoints: string[] = []
+    if (globalDeviceType === 'Denali_X8S' || globalDeviceType === 'DenaliThermostat') {
+      endpoints.push(`https://api.resideo.com/ris-public-api/api/v2/devices/denali/${deviceId}/state`)
     }
+    if (globalDeviceType === 'Fuji_X2S' || globalDeviceType === 'FujiThermostat') {
+      endpoints.push(`https://api.resideo.com/ris-public-api/api/v2/devices/fuji/${deviceId}/state`)
+    }
+    // Always try the default thermostat endpoint last
+    endpoints.push(`https://api.resideo.com/ris-public-api/api/v2/devices/thermostats/${deviceId}/state`)
+
+    let lastError: any = null
+    for (const endpoint of endpoints) {
+      try {
+        this.logger.debug(`[ResideoClient] Trying endpoint: ${endpoint}`)
+        const { body: resBody } = await request(endpoint, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        })
+        const text = await resBody.text()
+        if (!text) {
+          this.logger.error(`[ResideoClient] Empty response when setting thermostat state for ${deviceId} at ${endpoint}`)
+          continue
+        }
+        let resp: { statusCode: number, error: any, status: string }
+        try {
+          resp = JSON.parse(text)
+        } catch (parseErr) {
+          this.logger.error(`[ResideoClient] Failed to parse thermostat state response for ${deviceId} at ${endpoint}:`, text)
+          continue
+        }
+        this.logger.debug(`[ResideoClient] Thermostat state set response for ${deviceId} at ${endpoint}:`, JSON.stringify(resp))
+        // Only return if statusCode is not 404 and not >= 400 (error)
+        if (!(resp.statusCode && (resp.statusCode === 404 || resp.statusCode >= 400)) && !(resp.error || resp.status === 'error')) {
+          return resp
+        }
+        // Otherwise, log and try next
+        if (resp.statusCode && resp.statusCode === 404) {
+          this.logger.warn(`[ResideoClient] Endpoint ${endpoint} returned 404 for deviceId: ${deviceId}`)
+        } else if (resp.statusCode && resp.statusCode >= 400) {
+          this.logger.error(`[ResideoClient] Endpoint ${endpoint} returned error statusCode ${resp.statusCode} for deviceId: ${deviceId}`)
+        } else if (resp.error || resp.status === 'error') {
+          this.logger.error(`[ResideoClient] Endpoint ${endpoint} returned error in response for deviceId: ${deviceId}: ${JSON.stringify(resp)}`)
+        }
+        lastError = resp
+      } catch (err) {
+        this.logger.error(`[ResideoClient] Error setting thermostat state for ${deviceId} at endpoint ${endpoint}:`, err)
+        lastError = err
+      }
+    }
+    // If all endpoints fail, throw last error
+    throw lastError || new Error('All endpoints failed for setThermostatState')
   }
 
   async refreshAccessToken(): Promise<string> {

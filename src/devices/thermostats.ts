@@ -203,8 +203,8 @@ export class Thermostats extends deviceBase {
       this.logDebug(`Thermostat ${this.accessory.displayName}: pushChanges API response: ${JSON.stringify(resp)}`)
       if (!resp || (typeof resp === 'object' && Object.keys(resp).length === 0)) {
         this.logWarn(`Thermostat ${this.accessory.displayName}: API response is empty or missing expected data after pushChanges.`)
-      } else if (resp.error || resp.status === 'error') {
-        this.logError(`Thermostat ${this.accessory.displayName}: API reported error in response: ${JSON.stringify(resp)}`)
+      } else if (resp.error || resp.status === 'error' || (resp.statusCode && resp.statusCode >= 400)) {
+        this.logError(`Thermostat ${this.accessory.displayName}: API reported error or bad status in response: ${JSON.stringify(resp)}`)
       } else {
         this.logInfo(`Thermostat ${this.accessory.displayName}: pushChanges command sent successfully, response: ${JSON.stringify(resp)}`)
       }
