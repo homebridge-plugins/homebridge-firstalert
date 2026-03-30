@@ -258,11 +258,14 @@ export class ResideoClient {
     this.logger.debug(`[ResideoClient] Fetching device state for deviceId: ${deviceId}`)
     const token = await this.getAccessToken()
     try {
-      const { body: resBody } = await request(`https://api.resideo.com/ris-public-api/api/v2/devices/smokeDetectors/${deviceId}/state`, {
+      const response = await request(`https://api.resideo.com/ris-public-api/api/v2/devices/smokeDetectors/${deviceId}/state`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
       })
-      const text = await resBody.text()
+      this.logger.info(`[ResideoClient] HTTP status: ${response.statusCode}`)
+      this.logger.info(`[ResideoClient] HTTP headers: ${JSON.stringify(response.headers)}`)
+      const text = await response.body.text()
+      this.logger.info(`[ResideoClient] Raw response body for ${deviceId}: ${text}`)
       if (!text) {
         this.logger.error(`[ResideoClient] Empty response when fetching device state for ${deviceId}`)
         throw new Error('Empty response from Resideo API')

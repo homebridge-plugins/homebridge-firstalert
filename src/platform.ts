@@ -71,6 +71,7 @@ export class ResideoPlatform implements DynamicPlatformPlugin {
           case 'smokeDetector':
           case 'carbonMonoxideSensor':
           case 'carbonDioxideSensor':
+          case 'Citadel_SC5':
             instance = new SmokeSensor(this, accessory, device as any)
             break
           case 'LevitonDimmerModel_1':
