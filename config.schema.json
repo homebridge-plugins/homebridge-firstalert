@@ -1,0 +1,103 @@
+{
+  "pluginAlias": "FirstAlert",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "<p align='center'><strong>First Alert</strong></p>\n\nThe **First Alert** plugin allows you to control and monitor First Alert smoke and carbon monoxide detectors from HomeKit and Matter.",
+  "footerDisplay": "Please raise any issues on our [project page](https://github.com/homebridge-plugins/homebridge-firstalert/issues).",
+  "schema": {
+    "type": "object",
+    "required": [],
+    "properties": {
+      "name": {
+        "type": "string",
+        "title": "Name",
+        "default": "First Alert"
+      },
+      "devices": {
+        "type": "array",
+        "title": "Devices",
+        "description": "List of First Alert devices to manage.",
+        "items": {
+          "type": "object",
+          "required": [
+            "deviceId",
+            "deviceType"
+          ],
+          "properties": {
+            "deviceId": {
+              "type": "string",
+              "title": "Device ID",
+              "description": "Unique identifier for this device (e.g. MAC address or serial number)."
+            },
+            "name": {
+              "type": "string",
+              "title": "Name",
+              "description": "Friendly name for this device as shown in HomeKit/Matter."
+            },
+            "deviceType": {
+              "type": "string",
+              "title": "Device Type",
+              "description": "Select the type of First Alert detector.",
+              "enum": [
+                "smoke",
+                "co",
+                "smoke-co"
+              ],
+              "enumNames": [
+                "Smoke Detector",
+                "Carbon Monoxide Detector",
+                "Smoke/CO Combination Detector"
+              ],
+              "default": "smoke-co"
+            },
+            "enabled": {
+              "type": "boolean",
+              "title": "Enabled",
+              "description": "Enable or disable this device without removing it from the config.",
+              "default": true
+            }
+          }
+        }
+      },
+      "enableMatter": {
+        "type": "boolean",
+        "title": "Enable Matter Support (Override)",
+        "description": "Manually enable or disable Matter support. By default, Matter is auto-detected from the Homebridge configuration. Only change this if you need to override the auto-detection."
+      },
+      "preferMatter": {
+        "type": "boolean",
+        "title": "Prefer Matter when available",
+        "description": "If enabled and Matter is available, devices will be presented as native Matter accessories instead of HAP accessories. Requires Homebridge v2.0+ with Matter enabled.",
+        "default": true
+      }
+    }
+  },
+  "layout": [
+    {
+      "type": "fieldset",
+      "title": "General",
+      "expandable": false,
+      "items": [
+        "name"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Devices",
+      "expandable": false,
+      "items": [
+        "devices"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Advanced Settings",
+      "expandable": true,
+      "expanded": false,
+      "items": [
+        "enableMatter",
+        "preferMatter"
+      ]
+    }
+  ]
+}
