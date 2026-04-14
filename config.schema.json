@@ -55,6 +55,12 @@
               "title": "Enabled",
               "description": "Enable or disable this device without removing it from the config.",
               "default": true
+            },
+            "external": {
+              "type": "boolean",
+              "title": "External Accessory",
+              "description": "Publish this device as a standalone external accessory that pairs separately, rather than being included in the Homebridge bridge. Useful for devices you want to expose directly to HomeKit or Matter controllers without going through the bridge.",
+              "default": false
             }
           }
         }

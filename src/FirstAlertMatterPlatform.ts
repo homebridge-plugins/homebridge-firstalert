@@ -83,6 +83,12 @@ export class FirstAlertMatterPlatform {
   /**
    * Discover and register all configured devices as Matter accessories.
    *
+   * Devices with `external: true` are published via
+   * `api.matter.publishExternalAccessories()` (when the API is available) so
+   * they appear as standalone Matter devices rather than being bridged through
+   * Homebridge. If the API is not available (older Homebridge build), they fall
+   * back to the regular bridge registration with a warning.
+   *
    * Also cleans up any legacy HAP accessories that were cached from a previous
    * HAP-mode run to prevent duplicate or stale accessories.
    */
@@ -97,21 +103,58 @@ export class FirstAlertMatterPlatform {
     }
 
     const devices: FirstAlertDeviceConfig[] = this.config.devices ?? []
+    const enabledDevices = devices.filter(d => d.enabled !== false)
+
+    const externalDevices = enabledDevices.filter(d => d.external === true)
+    const bridgedDevices = enabledDevices.filter(d => d.external !== true)
+
+    // UUIDs that should remain in the bridged cache
+    const configuredBridgedUUIDs = new Set<string>(bridgedDevices.map(d => this.api.matter.uuid.generate(d.deviceId)))
 
     const toRegister: MatterAccessory[] = []
     const toUpdate: MatterAccessory[] = []
+    const toRegisterExternal: MatterAccessory[] = []
 
-    // Build the set of UUIDs that should be present
-    const configuredUUIDs = new Set<string>()
+    // ── External accessories ────────────────────────────────────────────────
+    for (const device of externalDevices) {
+      const uuid = this.api.matter.uuid.generate(device.deviceId)
 
-    for (const device of devices) {
-      if (device.enabled === false) {
-        this.log.debug('Skipping disabled device:', device.deviceId)
-        continue
+      // If previously bridged, unregister from the bridge first
+      const bridgedAccessory = this.matterAccessories.get(uuid)
+      if (bridgedAccessory) {
+        this.log.info('Migrating Matter accessory from bridged to external:', bridgedAccessory.displayName)
+        await this.api.matter.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [bridgedAccessory])
+        this.matterAccessories.delete(uuid)
       }
 
+      const displayName = device.name ?? `First Alert ${device.deviceId}`
+      this.log.info('Publishing external Matter accessory:', displayName)
+      const accessory = this.createMatterAccessory(uuid, displayName, device)
+      if (accessory) {
+        toRegisterExternal.push(accessory)
+      }
+    }
+
+    if (toRegisterExternal.length > 0) {
+      // api.matter.publishExternalAccessories is available in Homebridge v2 builds that support
+      // standalone Matter devices. Use a typed local to avoid repeating the cast.
+      const matterApi = this.api.matter as any
+      if (typeof matterApi.publishExternalAccessories === 'function') {
+        await matterApi.publishExternalAccessories(PLUGIN_NAME, PLATFORM_NAME, toRegisterExternal)
+        this.log.info(`Published ${toRegisterExternal.length} external Matter ${this.pluralAccessory(toRegisterExternal.length)}`)
+      }
+      else {
+        this.log.warn(
+          'Matter external accessories are not supported in this version of Homebridge; '
+          + 'registering through the bridge instead.',
+        )
+        toRegister.push(...toRegisterExternal)
+      }
+    }
+
+    // ── Bridged accessories ─────────────────────────────────────────────────
+    for (const device of bridgedDevices) {
       const uuid = this.api.matter.uuid.generate(device.deviceId)
-      configuredUUIDs.add(uuid)
 
       const existingAccessory = this.matterAccessories.get(uuid)
       if (existingAccessory) {
@@ -158,17 +201,17 @@ export class FirstAlertMatterPlatform {
 
     if (toRegister.length > 0) {
       await this.api.matter.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, toRegister)
-      this.log.info(`Registered ${toRegister.length} Matter accessor${toRegister.length === 1 ? 'y' : 'ies'}`)
+      this.log.info(`Registered ${toRegister.length} Matter ${this.pluralAccessory(toRegister.length)}`)
     }
 
     if (toUpdate.length > 0) {
       await this.api.matter.updatePlatformAccessories(toUpdate)
-      this.log.info(`Updated ${toUpdate.length} Matter accessor${toUpdate.length === 1 ? 'y' : 'ies'}`)
+      this.log.info(`Updated ${toUpdate.length} Matter ${this.pluralAccessory(toUpdate.length)}`)
     }
 
-    // Remove accessories that are no longer in the config
+    // Remove bridged accessories that are no longer in the config (or switched to external)
     for (const [uuid, accessory] of this.matterAccessories) {
-      if (!configuredUUIDs.has(uuid)) {
+      if (!configuredBridgedUUIDs.has(uuid)) {
         this.log.info('Removing stale Matter accessory:', accessory.displayName)
         await this.api.matter.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory])
         this.matterAccessories.delete(uuid)
@@ -278,5 +321,12 @@ export class FirstAlertMatterPlatform {
         },
       },
     }
+  }
+
+  /**
+   * Return "accessory" or "accessories" based on count.
+   */
+  private pluralAccessory(count: number): string {
+    return count === 1 ? 'accessory' : 'accessories'
   }
 }

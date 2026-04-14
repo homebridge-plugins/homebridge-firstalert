@@ -36,6 +36,8 @@ export interface FirstAlertDeviceConfig {
   deviceType: 'smoke' | 'co' | 'smoke-co'
   /** Whether this device is enabled */
   enabled?: boolean
+  /** Whether to publish this device as a standalone external accessory instead of a bridged one */
+  external?: boolean
 }
 
 /**

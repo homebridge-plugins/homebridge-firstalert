@@ -49,16 +49,51 @@ export class FirstAlertHAPPlatform implements DynamicPlatformPlugin {
 
   /**
    * Discover and register all configured devices as HAP accessories.
+   *
+   * Devices with `external: true` are published via `api.publishExternalAccessories()`
+   * so they appear as standalone HomeKit accessories (with their own pairing code)
+   * rather than being bridged through Homebridge.
    */
   discoverDevices(): void {
     const devices: FirstAlertDeviceConfig[] = this.config.devices ?? []
+    const enabledDevices = devices.filter(d => d.enabled !== false)
 
-    for (const device of devices) {
-      if (device.enabled === false) {
-        this.log.debug('Skipping disabled device:', device.deviceId)
-        continue
+    const externalDevices = enabledDevices.filter(d => d.external === true)
+    const bridgedDevices = enabledDevices.filter(d => d.external !== true)
+
+    // UUIDs that should remain in the bridged cache after this run
+    const bridgedUUIDs = new Set(bridgedDevices.map(d => this.api.hap.uuid.generate(d.deviceId)))
+
+    // Capitalize the constructor reference to satisfy the new-cap lint rule
+    const PlatformAccessory = this.api.platformAccessory
+
+    // ── External accessories ────────────────────────────────────────────────
+    const toPublishExternal: PlatformAccessory[] = []
+    for (const device of externalDevices) {
+      const uuid = this.api.hap.uuid.generate(device.deviceId)
+
+      // If this device was previously registered as a bridged accessory, remove it first
+      const bridgedAccessory = this.accessories.get(uuid)
+      if (bridgedAccessory) {
+        this.log.info('Migrating accessory from bridged to external:', bridgedAccessory.displayName)
+        this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [bridgedAccessory])
+        this.accessories.delete(uuid)
       }
 
+      const displayName = device.name ?? `First Alert ${device.deviceId}`
+      this.log.info('Publishing external accessory:', displayName)
+      const accessory = new PlatformAccessory(displayName, uuid)
+      accessory.context.device = device
+      this.setupAccessoryServices(accessory, device)
+      toPublishExternal.push(accessory)
+    }
+
+    if (toPublishExternal.length > 0) {
+      this.api.publishExternalAccessories(PLUGIN_NAME, toPublishExternal)
+    }
+
+    // ── Bridged accessories ─────────────────────────────────────────────────
+    for (const device of bridgedDevices) {
       const uuid = this.api.hap.uuid.generate(device.deviceId)
       const existingAccessory = this.accessories.get(uuid)
 
@@ -71,7 +106,7 @@ export class FirstAlertHAPPlatform implements DynamicPlatformPlugin {
         const displayName = device.name ?? `First Alert ${device.deviceId}`
         this.log.info('Adding new accessory:', displayName)
 
-        const accessory = new this.api.platformAccessory(displayName, uuid)
+        const accessory = new PlatformAccessory(displayName, uuid)
         accessory.context.device = device
 
         this.setupAccessoryServices(accessory, device)
@@ -80,14 +115,9 @@ export class FirstAlertHAPPlatform implements DynamicPlatformPlugin {
       }
     }
 
-    // Remove accessories that are no longer in the config
-    const configuredUUIDs = new Set(
-      devices
-        .filter(d => d.enabled !== false)
-        .map(d => this.api.hap.uuid.generate(d.deviceId)),
-    )
+    // Remove bridged accessories that are no longer in the config (or switched to external)
     for (const [uuid, accessory] of this.accessories) {
-      if (!configuredUUIDs.has(uuid)) {
+      if (!bridgedUUIDs.has(uuid)) {
         this.log.info('Removing stale accessory:', accessory.displayName)
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory])
         this.accessories.delete(uuid)
