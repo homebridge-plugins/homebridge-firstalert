@@ -1,0 +1,55 @@
+{
+  "name": "homebridge-firstalert",
+  "displayName": "First Alert",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "The First Alert plugin allows you to access your First Alert smoke and carbon monoxide detector(s) from HomeKit.",
+  "author": "Homebridge Plugins <homebridge@homebridge.io>",
+  "license": "ISC",
+  "homepage": "https://github.com/homebridge-plugins/homebridge-firstalert#readme",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/homebridge-plugins/homebridge-firstalert.git"
+  },
+  "bugs": {
+    "url": "https://github.com/homebridge-plugins/homebridge-firstalert/issues"
+  },
+  "keywords": [
+    "homebridge-plugin",
+    "firstalert",
+    "first-alert",
+    "smoke",
+    "carbon-monoxide",
+    "detector",
+    "alarm",
+    "matter"
+  ],
+  "main": "dist/index.js",
+  "icon": "https://raw.githubusercontent.com/homebridge-plugins/homebridge-firstalert/latest/branding/icon.png",
+  "engineStrict": true,
+  "engines": {
+    "homebridge": "^2.0.0-beta.86",
+    "node": "^18 || ^20 || ^22 || ^24"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint --no-warn-ignored src/**/*.ts && npm run typecheck",
+    "lint:fix": "eslint --no-warn-ignored src/**/*.ts --fix && npm run typecheck",
+    "build": "npm run clean && tsc",
+    "clean": "shx rm -rf ./dist",
+    "prepublishOnly": "npm run lint && npm run build",
+    "postpublish": "npm run clean && npm ci"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@antfu/eslint-config": "^4.0.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.0.0",
+    "homebridge": "^2.0.0-beta.86",
+    "shx": "^0.3.4",
+    "typescript": "^5.7.0"
+  }
+}
