@@ -8,7 +8,7 @@ A [Homebridge](https://homebridge.io/) plugin for [First Alert](https://www.firs
 ## Features
 
 - Exposes First Alert smoke and CO detectors to HomeKit / Matter
-- Supports HAP (HomeKit Accessory Protocol) for all Homebridge versions
+- Supports HAP (HomeKit Accessory Protocol) on Homebridge v2.0+
 - Supports **Matter** when running on Homebridge v2.0+ with Matter enabled
 - Automatic HAP ↔ Matter selection via `preferMatter` / `enableMatter` config flags
 

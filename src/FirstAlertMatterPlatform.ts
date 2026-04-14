@@ -1,4 +1,4 @@
-import type { API, Logger, MatterAccessory, PlatformConfig } from 'homebridge'
+import type { API, Logger, MatterAccessory, PlatformAccessory, PlatformConfig } from 'homebridge'
 
 import type { FirstAlertDeviceConfig, FirstAlertPluginConfig } from './settings.js'
 
@@ -28,6 +28,13 @@ export class FirstAlertMatterPlatform {
    */
   readonly matterAccessories: Map<string, MatterAccessory> = new Map()
 
+  /**
+   * HAP accessories restored from the Homebridge cache (e.g. from a previous
+   * run in HAP mode). They must be unregistered at startup so they don't linger
+   * alongside the newly-registered Matter accessories.
+   */
+  private readonly _legacyHapAccessories: PlatformAccessory[] = []
+
   constructor(log: Logger, config: PlatformConfig, api: API) {
     this.log = log
     this.config = config as FirstAlertPluginConfig
@@ -54,10 +61,15 @@ export class FirstAlertMatterPlatform {
 
   /**
    * Called by Homebridge when a cached HAP accessory is restored from disk.
-   * This platform uses Matter accessories, so this is a no-op.
+   *
+   * This can happen when the plugin previously ran in HAP mode and the user
+   * switches to Matter. We track the stale HAP accessories here and remove
+   * them from Homebridge's cache at startup, preventing duplicate accessories
+   * and stale HAP services from lingering alongside Matter accessories.
    */
-  configureAccessory(): void {
-    // Not used – Matter accessories are handled via configureMatterAccessory
+  configureAccessory(accessory: PlatformAccessory): void {
+    this.log.info('Queuing legacy HAP accessory for removal (migrating to Matter):', accessory.displayName)
+    this._legacyHapAccessories.push(accessory)
   }
 
   /**
@@ -70,11 +82,24 @@ export class FirstAlertMatterPlatform {
 
   /**
    * Discover and register all configured devices as Matter accessories.
+   *
+   * Also cleans up any legacy HAP accessories that were cached from a previous
+   * HAP-mode run to prevent duplicate or stale accessories.
    */
   async discoverDevices(): Promise<void> {
+    // Remove any HAP accessories that were left over from a previous HAP-mode run
+    if (this._legacyHapAccessories.length > 0) {
+      this.log.info(
+        `Removing ${this._legacyHapAccessories.length} legacy HAP accessor${this._legacyHapAccessories.length === 1 ? 'y' : 'ies'} (migrated to Matter)`,
+      )
+      this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, this._legacyHapAccessories)
+      this._legacyHapAccessories.length = 0
+    }
+
     const devices: FirstAlertDeviceConfig[] = this.config.devices ?? []
 
     const toRegister: MatterAccessory[] = []
+    const toUpdate: MatterAccessory[] = []
 
     // Build the set of UUIDs that should be present
     const configuredUUIDs = new Set<string>()
@@ -90,8 +115,34 @@ export class FirstAlertMatterPlatform {
 
       const existingAccessory = this.matterAccessories.get(uuid)
       if (existingAccessory) {
-        this.log.info('Restoring existing Matter accessory from cache:', existingAccessory.displayName)
-        // Nothing extra needed – the accessory is already tracked
+        const displayName = device.name ?? `First Alert ${device.deviceId}`
+        const cachedDeviceType = (existingAccessory.context as any)?.device?.deviceType
+
+        if (cachedDeviceType !== device.deviceType) {
+          // Device type changed – must unregister and re-register with the new type
+          this.log.info('Device type changed, re-registering Matter accessory:', displayName)
+          await this.api.matter.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [existingAccessory])
+          this.matterAccessories.delete(uuid)
+
+          const updated = this.createMatterAccessory(uuid, displayName, device)
+          if (updated) {
+            toRegister.push(updated)
+            this.matterAccessories.set(uuid, updated)
+          }
+        }
+        else if (existingAccessory.displayName !== displayName) {
+          // Only the display name changed – update in place
+          this.log.info('Updating Matter accessory name:', displayName)
+          const updated = this.createMatterAccessory(uuid, displayName, device)
+          if (updated) {
+            toUpdate.push(updated)
+            this.matterAccessories.set(uuid, updated)
+          }
+        }
+        else {
+          this.log.info('Restoring existing Matter accessory from cache:', existingAccessory.displayName)
+        }
+
         continue
       }
 
@@ -108,6 +159,11 @@ export class FirstAlertMatterPlatform {
     if (toRegister.length > 0) {
       await this.api.matter.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, toRegister)
       this.log.info(`Registered ${toRegister.length} Matter accessor${toRegister.length === 1 ? 'y' : 'ies'}`)
+    }
+
+    if (toUpdate.length > 0) {
+      await this.api.matter.updatePlatformAccessories(toUpdate)
+      this.log.info(`Updated ${toUpdate.length} Matter accessor${toUpdate.length === 1 ? 'y' : 'ies'}`)
     }
 
     // Remove accessories that are no longer in the config
@@ -144,8 +200,11 @@ export class FirstAlertMatterPlatform {
   }
 
   /**
-   * Create a Matter smoke sensor accessory using the SmokeSensor device type
-   * with the SmokeAlarm feature enabled.
+   * Create a smoke-only Matter accessory.
+   *
+   * Uses the Homebridge `SmokeSensor` device-type alias (which maps to the
+   * Matter specification `SmokeCoAlarm` device type, device ID 0x0076), with
+   * only the `SmokeAlarm` feature cluster enabled.
    */
   protected createSmokeSensorAccessory(uuid: string, displayName: string, device: FirstAlertDeviceConfig): MatterAccessory {
     const deviceType = this.api.matter.deviceTypes.SmokeSensor.with(
@@ -155,8 +214,11 @@ export class FirstAlertMatterPlatform {
   }
 
   /**
-   * Create a Matter carbon monoxide sensor accessory using the SmokeSensor device type
-   * with the CoAlarm feature enabled.
+   * Create a carbon-monoxide-only Matter accessory.
+   *
+   * Uses the Homebridge `SmokeSensor` device-type alias (which maps to the
+   * Matter specification `SmokeCoAlarm` device type, device ID 0x0076), with
+   * only the `CoAlarm` feature cluster enabled.
    */
   protected createCOSensorAccessory(uuid: string, displayName: string, device: FirstAlertDeviceConfig): MatterAccessory {
     const deviceType = this.api.matter.deviceTypes.SmokeSensor.with(
@@ -166,8 +228,11 @@ export class FirstAlertMatterPlatform {
   }
 
   /**
-   * Create a combined smoke and carbon monoxide sensor Matter accessory using the
-   * SmokeSensor device type with both SmokeAlarm and CoAlarm features enabled.
+   * Create a combined smoke + carbon monoxide Matter accessory.
+   *
+   * Uses the Homebridge `SmokeSensor` device-type alias (which maps to the
+   * Matter specification `SmokeCoAlarm` device type, device ID 0x0076), with
+   * both `SmokeAlarm` and `CoAlarm` feature clusters enabled.
    */
   protected createSmokeCOAccessory(uuid: string, displayName: string, device: FirstAlertDeviceConfig): MatterAccessory {
     const deviceType = this.api.matter.deviceTypes.SmokeSensor.with(

@@ -62,7 +62,8 @@
       "enableMatter": {
         "type": "boolean",
         "title": "Enable Matter Support (Override)",
-        "description": "Manually enable or disable Matter support. By default, Matter is auto-detected from the Homebridge configuration. Only change this if you need to override the auto-detection."
+        "description": "Allow Matter support unless it is disabled here. By default, Matter availability is auto-detected from the Homebridge configuration, and this setting cannot force Matter on if Homebridge has it disabled or unavailable.",
+        "default": true
       },
       "preferMatter": {
         "type": "boolean",
