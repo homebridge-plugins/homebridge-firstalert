@@ -10,6 +10,7 @@ import { interval, Subject } from 'rxjs'
 import { skipWhile } from 'rxjs/operators'
 
 import { deviceBase } from './device.js'
+import { COMBO_SMOKE_CO_TYPES, parseSmokeState } from './smokeState.js'
 
 /**
  * SmokeSensor device class for Homebridge FirstAlert platform.
@@ -77,7 +78,7 @@ export class SmokeSensor extends deviceBase {
       .onGet(() => this.SmokeSensor.SmokeDetected)
 
     // Carbon Monoxide Sensor Service (optional)
-    if (device.globalDeviceType?.toLowerCase().includes('co')) {
+    if (device.globalDeviceType?.toLowerCase().includes('co') || COMBO_SMOKE_CO_TYPES.has(device.globalDeviceType)) {
       accessory.context.CarbonMonoxideSensor = accessory.context.CarbonMonoxideSensor ?? {}
       this.CarbonMonoxideSensor = {
         Name: accessory.context.CarbonMonoxideSensor.Name ?? `${accessory.displayName} CO Sensor`,
@@ -127,37 +128,25 @@ export class SmokeSensor extends deviceBase {
    * Parse the device status from the FirstAlert api
    */
   async parseStatus(): Promise<void> {
-    this.logDebug('Parsing SmokeSensor status from device:', JSON.stringify(this.device))
-    // Use a single variable for dynamic property access
-    const d: any = this.device
-    // Battery
-    this.Battery.BatteryLevel = Number(d.batteryLevel ?? 100)
-    this.Battery.Service.getCharacteristic(this.hap.Characteristic.BatteryLevel).updateValue(this.Battery.BatteryLevel)
-    // Consider battery low if < 15%
-    this.Battery.StatusLowBattery = this.Battery.BatteryLevel < 15 ? this.hap.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : this.hap.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
-
-    // Smoke
-    this.SmokeSensor.SmokeDetected = (d.smokePresent ?? d.smoke_detected ?? d.smoke ?? false)
-      ? this.hap.Characteristic.SmokeDetected.SMOKE_DETECTED
-      : this.hap.Characteristic.SmokeDetected.SMOKE_NOT_DETECTED
-
-    // CO
+    const parsed = parseSmokeState(this.device)
+    const C = this.hap.Characteristic
+    // The API reports battery as good/low/replace/critical, so map it to a nominal level.
+    this.Battery.BatteryLevel = parsed.batteryLow ? 10 : 100
+    this.Battery.StatusLowBattery = parsed.batteryLow ? C.StatusLowBattery.BATTERY_LEVEL_LOW : C.StatusLowBattery.BATTERY_LEVEL_NORMAL
+    this.SmokeSensor.SmokeDetected = parsed.smoke ? C.SmokeDetected.SMOKE_DETECTED : C.SmokeDetected.SMOKE_NOT_DETECTED
+    this.SmokeSensor.Service.updateCharacteristic(C.StatusActive, parsed.online)
+    this.SmokeSensor.Service.updateCharacteristic(C.StatusFault, parsed.faulted ? C.StatusFault.GENERAL_FAULT : C.StatusFault.NO_FAULT)
+    this.SmokeSensor.Service.updateCharacteristic(C.StatusLowBattery, this.Battery.StatusLowBattery)
     if (this.CarbonMonoxideSensor) {
-      this.CarbonMonoxideSensor.CarbonMonoxideDetected = (d.coPresent ?? d.co_detected ?? d.co ?? false)
-        ? this.hap.Characteristic.CarbonMonoxideDetected.CO_LEVELS_ABNORMAL
-        : this.hap.Characteristic.CarbonMonoxideDetected.CO_LEVELS_NORMAL
+      this.CarbonMonoxideSensor.CarbonMonoxideDetected = parsed.co ? C.CarbonMonoxideDetected.CO_LEVELS_ABNORMAL : C.CarbonMonoxideDetected.CO_LEVELS_NORMAL
+      this.CarbonMonoxideSensor.Service.updateCharacteristic(C.StatusActive, parsed.online)
+      this.CarbonMonoxideSensor.Service.updateCharacteristic(C.StatusFault, parsed.faulted ? C.StatusFault.GENERAL_FAULT : C.StatusFault.NO_FAULT)
     }
-    // CO2
     if (this.CarbonDioxideSensor) {
-      this.CarbonDioxideSensor.CarbonDioxideDetected = !!((d.co2Present ?? d.co2_detected ?? d.co2 ?? false))
+      const d: any = this.device
+      this.CarbonDioxideSensor.CarbonDioxideDetected = !!(d.co2Present ?? d.co2_detected ?? d.co2 ?? false)
     }
-    this.logDebug('SmokeSensor status parsed:', {
-      BatteryLevel: this.Battery.BatteryLevel,
-      StatusLowBattery: this.Battery.StatusLowBattery,
-      SmokeDetected: this.SmokeSensor.SmokeDetected,
-      CarbonMonoxideDetected: this.CarbonMonoxideSensor?.CarbonMonoxideDetected,
-      CarbonDioxideDetected: this.CarbonDioxideSensor?.CarbonDioxideDetected,
-    })
+    this.logDebug('SmokeSensor status parsed:', JSON.stringify({ ...parsed.states, online: parsed.online, faulted: parsed.faulted }))
   }
 
   /**
