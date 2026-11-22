@@ -14,7 +14,11 @@ This documentation provides a comprehensive reference for the Resideo First Aler
 
 ### Token Refresh
 
-Tokens expire after 1 hour. Use the refresh token to obtain new access tokens:
+Access tokens expire after 1 hour (`expires_in`). Use the refresh token to obtain new access tokens.
+
+**Refresh tokens rotate.** Each refresh response contains a new `refresh_token`, and the old one stops
+working. Persist the new token every time; reusing an old one returns
+`403 invalid_grant: Unknown or invalid refresh token.` and forces the user to re-link their account.
 
 ```http
 POST https://login.resideo.com/oauth/token
@@ -31,10 +35,17 @@ Content-Type: application/json
 
 ## API Endpoints
 
-**Base URL:** `https://api.resideo.com`
+**Base URL:** `https://api.ha.resideo.com`
+
+> **Host migration (September 2026):** Resideo moved the consumer API from `api.resideo.com` to
+> `api.ha.resideo.com`. The old host is retired and answers every known path with a permanent
+> `503 {"message":"The API is temporarily down for planned maintenance. Please try again later."}`,
+> with or without a valid token, while unknown paths return 404.
 
 All requests require:
 - `Authorization: Bearer <access_token>`
+- `Ocp-Apim-Subscription-Key: b60885e8a9b44680a29ea1f03452878a` (the First Alert app's public Azure APIM key)
+- `User-Agent: First Alert/2440 CFNetwork/3860.600.12 Darwin/25.5.0` (an app User-Agent)
 - `Content-Type: application/json`
 - `Accept: application/json`
 
@@ -121,9 +132,9 @@ GET /ris-public-api/api/v2/devices/smokeDetectors/{deviceId}/state
 
 | State                | Values / Description                        |
 |----------------------|---------------------------------------------|
-| smoke.deviceState    | `idle` (normal), `alarm` (smoke detected)   |
-| co.deviceState       | `idle` (normal), `alarm` (CO detected)      |
-| battery.deviceState  | `good`, `low`                               |
+| smoke.deviceState    | `idle`/`none` (normal); detected: `alarm`, `smokeAlarm`, `smokeEarlyWarning`, `smokeInterconnectAlarm`, `smokeEarlyWarningInterconnectAlarm` |
+| co.deviceState       | `idle`/`none` (normal); detected: `alarm`, `coAlarm`, `coEarlyWarning`, `carbonMonoxideAlarm`, `carbonMonoxideEarlyWarning`, `carbonMonoxideInterconnectAlarm`, `carbonMonoxideEarlyWarningInterconnectAlarm` |
+| battery.deviceState  | `good`, `low`, `replace`, `critical` (no percentage is reported) |
 | power.deviceState    | `ac`, `battery`                             |
 | malfunction.deviceState | `none`, (other = malfunction)            |
 | silence.deviceState  | `not_silenced`, `silenced`                  |
@@ -204,12 +215,14 @@ class ResideoClient:
             self._refresh_access_token()
         return {
             "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Ocp-Apim-Subscription-Key": "b60885e8a9b44680a29ea1f03452878a",
+            "User-Agent": "First Alert/2440 CFNetwork/3860.600.12 Darwin/25.5.0",
         }
 
     def get_accounts(self):
         resp = requests.get(
-            "https://api.resideo.com/ris-public-api/api/v1/accounts",
+            "https://api.ha.resideo.com/ris-public-api/api/v1/accounts",
             headers=self._headers()
         )
         return resp.json()
@@ -220,6 +233,8 @@ class ResideoClient:
 ## References
 
 - [ha-resideo-firstalert GitHub](https://github.com/aidenmitchell/ha-resideo-firstalert)
+- [rheeloaded/ha-resideo-firstalert v1.5.1: host migration to api.ha.resideo.com](https://github.com/rheeloaded/ha-resideo-firstalert/releases/tag/v1.5.1)
+- [pyresideo-firstalert 1.0.2 (PyPI): reference client with the new host, headers and alarm states](https://pypi.org/project/pyresideo-firstalert/)
 - [Official Resideo API Docs (if available)](https://developer.resideo.com/)
 
 ---

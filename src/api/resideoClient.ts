@@ -1,7 +1,35 @@
 // FirstAlert API client for OAuth and device polling
 // Implements token refresh, account/device fetch, and strong typing
 
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import process from 'node:process'
 import { request } from 'undici'
+
+/**
+ * Resideo retired api.resideo.com in September 2026. It now answers every call with a
+ * permanent 503 "The API is temporarily down for planned maintenance". The consumer API
+ * moved to api.ha.resideo.com, which rejects calls that lack the First Alert app's
+ * (public, non-secret) Azure APIM subscription key and an app User-Agent.
+ */
+export const RESIDEO_API_BASE_URL = 'https://api.ha.resideo.com'
+export const RESIDEO_TOKEN_URL = 'https://login.resideo.com/oauth/token'
+export const RESIDEO_API_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  'Ocp-Apim-Subscription-Key': 'b60885e8a9b44680a29ea1f03452878a',
+  'User-Agent': 'First Alert/2440 CFNetwork/3860.600.12 Darwin/25.5.0',
+})
+
+/** Error carrying the HTTP status so callers can tell auth failures from outages. */
+export class ResideoApiError extends Error {
+  constructor(message: string, public readonly status?: number, public readonly body?: unknown) {
+    super(message)
+    this.name = 'ResideoApiError'
+  }
+}
+
+const TOKEN_FILE_NAME = '.firstalert-token.json'
+const hashToken = (token: string): string => crypto.createHash('sha256').update(String(token)).digest('hex')
 
 export interface ResideoDevice {
   id: string
@@ -46,12 +74,89 @@ export class ResideoClient {
   private clientId = 'SRmiA7CaYi1JgivDZdzzoZu4X5VBogGt'
   private refreshToken: string
   private accessToken: string | null = null
+  private accessTokenExpiresAt = 0
+  private readonly configTokenHash: string
+  private readonly tokenFile: string
   private logger: any
 
-  constructor(refreshToken: string, logger: any) {
+  /**
+   * @param refreshToken The refresh token saved in config.json by the account-linking UI.
+   * @param logger Homebridge logger.
+   * @param storageDir Homebridge storage path. Resideo rotates refresh tokens on every use,
+   * so the newest token is persisted here; without it the plugin breaks on its next restart.
+   */
+  constructor(refreshToken: string, logger: any, storageDir?: string) {
     this.refreshToken = refreshToken
     this.logger = logger
+    this.configTokenHash = hashToken(refreshToken)
+    const dir = storageDir || process.env.HOMEBRIDGE_STORAGE_PATH || process.env.UIX_STORAGE_PATH || ''
+    this.tokenFile = dir ? path.join(dir, TOKEN_FILE_NAME) : ''
+    this.loadStoredToken()
     this.logger.debug('[ResideoClient] Initialized with refreshToken:', refreshToken ? '***' : 'none')
+  }
+
+  /** Use the newest rotated refresh token, if it belongs to the account currently linked in config. */
+  private loadStoredToken(): void {
+    if (!this.tokenFile) {
+      return
+    }
+    try {
+      const stored = JSON.parse(fs.readFileSync(this.tokenFile, 'utf8'))
+      if (stored?.configTokenHash === this.configTokenHash && stored.refreshToken) {
+        this.refreshToken = stored.refreshToken
+      } else if (stored) {
+        this.logger.info('[ResideoClient] Account was re-linked; ignoring previously stored token')
+      }
+    } catch {
+      // No stored token yet.
+    }
+  }
+
+  /** Persist a rotated refresh token atomically, readable only by the Homebridge user. */
+  private saveStoredToken(): void {
+    if (!this.tokenFile) {
+      this.logger.warn('[ResideoClient] No storage path; rotated refresh token cannot be persisted')
+      return
+    }
+    try {
+      const tmp = `${this.tokenFile}.tmp`
+      fs.writeFileSync(tmp, JSON.stringify({
+        configTokenHash: this.configTokenHash,
+        refreshToken: this.refreshToken,
+        updatedAt: new Date().toISOString(),
+      }), { mode: 0o600 })
+      fs.renameSync(tmp, this.tokenFile)
+    } catch (err: any) {
+      this.logger.error('[ResideoClient] Failed to persist rotated refresh token:', err?.message ?? err)
+    }
+  }
+
+  /** Authenticated GET with HTTP status checking and a single retry on 401. */
+  private async apiGet(urlPath: string, retried = false): Promise<any> {
+    const token = await this.getAccessToken()
+    const { statusCode, body } = await request(`${RESIDEO_API_BASE_URL}${urlPath}`, {
+      method: 'GET',
+      headers: { ...RESIDEO_API_HEADERS, Authorization: `Bearer ${token}` },
+    })
+    const text = await body.text()
+    let data: any
+    try {
+      data = text ? JSON.parse(text) : undefined
+    } catch {
+      data = undefined
+    }
+    if (statusCode === 401 && !retried) {
+      this.accessToken = null
+      return this.apiGet(urlPath, true)
+    }
+    if (statusCode < 200 || statusCode >= 300) {
+      const msg = data?.message || data?.error || text.slice(0, 200) || `HTTP ${statusCode}`
+      throw new ResideoApiError(`Resideo API ${statusCode}: ${msg}`, statusCode, data)
+    }
+    if (data === undefined) {
+      throw new ResideoApiError('Empty or non-JSON response from Resideo API', statusCode)
+    }
+    return data
   }
 
   /**
@@ -61,12 +166,13 @@ export class ResideoClient {
     this.logger.debug(`[ResideoClient] Setting valve state for deviceId: ${deviceId} (type: ${globalDeviceType}) with payload:`, JSON.stringify(payload))
     const token = await this.getAccessToken()
     const endpoint = (globalDeviceType === 'ShutoffValve_L7_T' || globalDeviceType === 'SmartMeterValve')
-      ? `https://api.resideo.com/ris-public-api/api/v2/devices/shutoffvalves/${deviceId}/state`
-      : `https://api.resideo.com/ris-public-api/api/v2/devices/valves/${deviceId}/state`
+      ? `${RESIDEO_API_BASE_URL}/ris-public-api/api/v2/devices/shutoffvalves/${deviceId}/state`
+      : `${RESIDEO_API_BASE_URL}/ris-public-api/api/v2/devices/valves/${deviceId}/state`
     try {
       const { body: resBody } = await request(endpoint, {
         method: 'POST',
         headers: {
+          ...RESIDEO_API_HEADERS,
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
@@ -101,13 +207,13 @@ export class ResideoClient {
     // Try multiple endpoints for special thermostat types
     const endpoints: string[] = []
     if (globalDeviceType === 'Denali_X8S' || globalDeviceType === 'DenaliThermostat') {
-      endpoints.push(`https://api.resideo.com/ris-public-api/api/v2/devices/denali/${deviceId}/state`)
+      endpoints.push(`${RESIDEO_API_BASE_URL}/ris-public-api/api/v2/devices/denali/${deviceId}/state`)
     }
     if (globalDeviceType === 'Fuji_X2S' || globalDeviceType === 'FujiThermostat') {
-      endpoints.push(`https://api.resideo.com/ris-public-api/api/v2/devices/fuji/${deviceId}/state`)
+      endpoints.push(`${RESIDEO_API_BASE_URL}/ris-public-api/api/v2/devices/fuji/${deviceId}/state`)
     }
     // Always try the default thermostat endpoint last
-    endpoints.push(`https://api.resideo.com/ris-public-api/api/v2/devices/thermostats/${deviceId}/state`)
+    endpoints.push(`${RESIDEO_API_BASE_URL}/ris-public-api/api/v2/devices/thermostats/${deviceId}/state`)
 
     let lastError: any = null
     for (const endpoint of endpoints) {
@@ -116,6 +222,7 @@ export class ResideoClient {
         const { body: resBody } = await request(endpoint, {
           method: 'POST',
           headers: {
+            ...RESIDEO_API_HEADERS,
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
@@ -158,45 +265,41 @@ export class ResideoClient {
 
   async refreshAccessToken(): Promise<string> {
     this.logger.debug('[ResideoClient] Refreshing access token...')
-    const body = JSON.stringify({
-      grant_type: 'refresh_token',
-      refresh_token: this.refreshToken,
-      client_id: this.clientId,
+    // Another process (the settings UI or the bridge) may have rotated the token since we started.
+    this.loadStoredToken()
+    const { statusCode, body: resBody } = await request(RESIDEO_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: this.refreshToken, client_id: this.clientId }),
     })
+    const text = await resBody.text()
+    let data: { access_token?: string, refresh_token?: string, expires_in?: number, error?: string, error_description?: string } = {}
     try {
-      const { body: resBody } = await request('https://login.resideo.com/oauth/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-      })
-      const text = await resBody.text()
-      if (!text) {
-        this.logger.error('[ResideoClient] Empty response when refreshing access token')
-        throw new Error('Empty response from Resideo API')
-      }
-      let data: { access_token?: string }
-      try {
-        data = JSON.parse(text)
-      } catch (parseErr) {
-        this.logger.error('[ResideoClient] Failed to parse access token response:', text)
-        throw parseErr
-      }
-      this.accessToken = data.access_token ?? ''
-      if (!this.accessToken) {
-        this.logger.error('[ResideoClient] Failed to obtain access token from Resideo API')
-        throw new Error('Failed to obtain access token from Resideo API')
-      }
-      this.logger.debug('[ResideoClient] Access token obtained:', `${this.accessToken.substring(0, 8)}...`)
-      return this.accessToken
-    } catch (err) {
-      this.logger.error('[ResideoClient] Error refreshing access token:', err)
-      throw err
+      data = text ? JSON.parse(text) : {}
+    } catch {
+      // Non-JSON error page; handled below.
     }
+    if (statusCode !== 200 || !data.access_token) {
+      const reason = data.error_description || data.error || `HTTP ${statusCode}`
+      if (data.error === 'invalid_grant') {
+        this.logger.error(`[ResideoClient] Resideo rejected the saved login (${reason}). Open the plugin settings and click "Link Resideo Account" again.`)
+      } else {
+        this.logger.error(`[ResideoClient] Token refresh failed: ${reason}`)
+      }
+      throw new ResideoApiError(`Token refresh failed: ${reason}`, statusCode, data)
+    }
+    this.accessToken = data.access_token
+    this.accessTokenExpiresAt = Date.now() + (Number(data.expires_in) || 3600) * 1000
+    if (data.refresh_token && data.refresh_token !== this.refreshToken) {
+      this.refreshToken = data.refresh_token
+      this.saveStoredToken()
+      this.logger.debug('[ResideoClient] Refresh token rotated and saved')
+    }
+    return this.accessToken
   }
 
   async getAccessToken(): Promise<string> {
-    if (!this.accessToken) {
-      this.logger.debug('[ResideoClient] No cached access token, refreshing...')
+    if (!this.accessToken || Date.now() > this.accessTokenExpiresAt - 60_000) {
       await this.refreshAccessToken()
     }
     return this.accessToken!
@@ -204,84 +307,44 @@ export class ResideoClient {
 
   async getAccount(): Promise<ResideoAccount> {
     this.logger.debug('[ResideoClient] Fetching account info...')
-    const token = await this.getAccessToken()
-    try {
-      const { body: resBody } = await request('https://api.resideo.com/ris-public-api/api/v1/accounts', {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const text = await resBody.text()
-      if (!text) {
-        this.logger.error('[ResideoClient] Empty response when fetching account info')
-        throw new Error('Empty response from Resideo API')
-      }
-      let resp: { data: any }
-      try {
-        resp = JSON.parse(text)
-      } catch (parseErr) {
-        this.logger.error('[ResideoClient] Failed to parse account info response:', text)
-        throw parseErr
-      }
-      // Parse and flatten devices
-      const data = resp.data
-      this.logger.debug('[ResideoClient] Account countryCode:', data.countryCode, 'locale:', data.locale)
-      const devices: ResideoDevice[] = []
-      for (const user of data.consumerUsers) {
-        for (const loc of user.consumerAccount.locations) {
-          for (const dev of loc.consumerDevices) {
-            devices.push({
-              id: dev.id,
-              name: dev.name,
-              deviceId: dev.device.deviceId,
-              globalDeviceType: dev.device.globalDeviceType,
-            })
+    const resp = await this.apiGet('/ris-public-api/api/v1/accounts')
+    const data = resp?.data ?? resp
+    if (!data || !Array.isArray(data.consumerUsers)) {
+      this.logger.error('[ResideoClient] Unexpected account response shape. Top-level keys:', Object.keys(resp ?? {}).join(','))
+      throw new ResideoApiError('Unexpected account response shape', 200)
+    }
+    const devices: ResideoDevice[] = []
+    for (const user of data.consumerUsers) {
+      for (const loc of user?.consumerAccount?.locations ?? []) {
+        for (const dev of loc?.consumerDevices ?? []) {
+          if (!dev?.device?.deviceId) {
+            continue
           }
+          devices.push({
+            id: dev.id,
+            name: dev.name,
+            deviceId: dev.device.deviceId,
+            globalDeviceType: dev.device.globalDeviceType,
+          })
         }
       }
-      this.logger.debug(`[ResideoClient] Found ${devices.length} devices.`)
-      return {
-        id: data.id,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        contactEmail: data.contactEmail,
-        countryCode: data.countryCode,
-        locale: data.locale,
-        devices,
-      }
-    } catch (err) {
-      this.logger.error('[ResideoClient] Error fetching account info:', err)
-      throw err
+    }
+    this.logger.debug(`[ResideoClient] Found ${devices.length} devices.`)
+    return {
+      id: data.id,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      contactEmail: data.contactEmail,
+      countryCode: data.countryCode,
+      locale: data.locale,
+      devices,
     }
   }
 
   async getDeviceState(deviceId: string): Promise<ResideoDeviceState> {
     this.logger.debug(`[ResideoClient] Fetching device state for deviceId: ${deviceId}`)
-    const token = await this.getAccessToken()
-    try {
-      const response = await request(`https://api.resideo.com/ris-public-api/api/v2/devices/smokeDetectors/${deviceId}/state`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      this.logger.info(`[ResideoClient] HTTP status: ${response.statusCode}`)
-      this.logger.info(`[ResideoClient] HTTP headers: ${JSON.stringify(response.headers)}`)
-      const text = await response.body.text()
-      this.logger.info(`[ResideoClient] Raw response body for ${deviceId}: ${text}`)
-      if (!text) {
-        this.logger.error(`[ResideoClient] Empty response when fetching device state for ${deviceId}`)
-        throw new Error('Empty response from Resideo API')
-      }
-      let state: ResideoDeviceState
-      try {
-        state = JSON.parse(text)
-      } catch (parseErr) {
-        this.logger.error(`[ResideoClient] Failed to parse device state response for ${deviceId}:`, text)
-        throw parseErr
-      }
-      this.logger.debug(`[ResideoClient] Device state for ${deviceId}:`, JSON.stringify(state))
-      return state
-    } catch (err) {
-      this.logger.error(`[ResideoClient] Error fetching device state for ${deviceId}:`, err)
-      throw err
-    }
+    const state = await this.apiGet(`/ris-public-api/api/v2/devices/smokeDetectors/${encodeURIComponent(deviceId)}/state`)
+    this.logger.debug(`[ResideoClient] Device state for ${deviceId}:`, JSON.stringify(state))
+    return state as ResideoDeviceState
   }
 }

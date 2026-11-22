@@ -1,7 +1,7 @@
 import type { deviceBase } from './devices/device.js'
 import type { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig } from 'homebridge'
 
-import { ResideoClient } from './api/resideoClient.js'
+import { ResideoApiError, ResideoClient } from './api/resideoClient.js'
 import { LeakSensor } from './devices/leaksensors.js'
 import { SmokeSensor } from './devices/smoke.js'
 import { Thermostats } from './devices/thermostats.js'
@@ -17,6 +17,7 @@ export class ResideoPlatform implements DynamicPlatformPlugin {
   private accessories: PlatformAccessory[] = []
   private deviceInstances: Record<string, deviceBase> = {}
   private unsupportedDeviceIds: Set<string> = new Set()
+  private discoverRetryMs = 60_000
 
   constructor(log: Logger, config: PlatformConfig, api: API) {
     this.log = log
@@ -27,7 +28,7 @@ export class ResideoPlatform implements DynamicPlatformPlugin {
       this.log.error('No refresh token configured. Please log in via the Homebridge UI.')
       return
     }
-    this.client = new ResideoClient(config.refreshToken, this.log)
+    this.client = new ResideoClient(config.refreshToken, this.log, api.user.storagePath())
     api.on('didFinishLaunching', () => this.discoverDevices())
   }
 
@@ -89,9 +90,19 @@ export class ResideoPlatform implements DynamicPlatformPlugin {
       if (unknownTypes.length > 0) {
         this.log.warn(`[Unknown Types] The following device types are not handled: ${unknownTypes.join(', ')}`)
       }
+      this.discoverRetryMs = 60_000
       this.startPolling(account.devices.map(d => d.deviceId))
-    } catch (err) {
-      this.log.error('Failed to discover devices:', err)
+    } catch (err: any) {
+      const status = err instanceof ResideoApiError ? err.status : undefined
+      if (status === 400 || status === 401 || status === 403) {
+        this.log.error(`Failed to discover devices: ${err?.message ?? err}. Not retrying; re-link the account in the plugin settings.`)
+        return
+      }
+      // Outages and Resideo maintenance windows: retry with exponential backoff (1 min doubling to 30 min).
+      const wait = this.discoverRetryMs
+      this.discoverRetryMs = Math.min(this.discoverRetryMs * 2, 30 * 60_000)
+      this.log.warn(`Failed to discover devices: ${err?.message ?? err}. Retrying in ${Math.round(wait / 60_000)} min.`)
+      setTimeout(() => this.discoverDevices(), wait)
     }
   }
 

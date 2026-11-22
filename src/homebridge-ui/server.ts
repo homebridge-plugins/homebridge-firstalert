@@ -39,11 +39,13 @@ class PluginUiServer extends HomebridgePluginUiServer {
           return { status: 'error', data: 'No refresh token provided' }
         }
         // Use statically imported ResideoClient
-        const client = new ResideoClient(refreshToken, uiLogger)
+        // Share the bridge's token store so a rotated refresh token is never reused.
+        const client = new ResideoClient(refreshToken, uiLogger, this.homebridgeStoragePath)
         const account = await client.getAccount()
-        uiLogger.info('[discoverResideoDevices] Raw account response:', JSON.stringify(account, null, 2))
+        // Do not log the account object: it contains the owner's name and email.
+        uiLogger.info(`[discoverResideoDevices] Found ${account?.devices?.length ?? 0} devices`)
         if (!account || !Array.isArray(account.devices) || account.devices.length === 0) {
-          uiLogger.warn('[discoverResideoDevices] No devices found in account:', JSON.stringify(account, null, 2))
+          uiLogger.warn('[discoverResideoDevices] No devices found in account')
         }
         // Optionally cache account.devices here if needed
         return { status: 'ok', data: account.devices }
